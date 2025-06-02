@@ -1,0 +1,45 @@
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+
+# OS arquivos
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Arquivos de build (caso tenha)
+dist/
+build/
+
+# Arquivos temporários
+*.tmp
+*.temp
+
+# Arquivos do sistema
+*.swp
+*.swo
+
+# Arquivos do npm
+package-lock.json
+
+# Outras configurações
+yarn.lock
+
+# Excluir .wwebbjs_auth e tudo dentro dele
+.wwebjs_auth/*
+# Excluir .wwebbjs_cache e tudo dentro dele
+.wwebjs_cache/*
+
+todo.md
