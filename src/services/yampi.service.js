@@ -15,13 +15,25 @@ const cartReminderMessages = JSON.parse(fs.readFileSync(path.join(__dirname, "me
 
 const formatWhatsappId = (phoneNumber) => {
     if (!phoneNumber) return null;
-    const phoneNumberObj = parsePhoneNumberFromString(phoneNumber, "BR");
+    phoneNumber = phoneNumber.replace(/[^\d]/g, "");
+    let phoneNumberObj = parsePhoneNumberFromString(phoneNumber, "BR");
+
     if (!phoneNumberObj || !phoneNumberObj.isValid()) {
         console.warn(`Número inválido: ${phoneNumber}`);
-        return null;
+        if (phoneNumber.length === 10) {
+            phoneNumber = "9" + phoneNumber;
+            phoneNumberObj = parsePhoneNumberFromString(phoneNumber, "BR");
+            if (!phoneNumberObj || !phoneNumberObj.isValid()) {
+                console.warn(`Número inválido após a correção: ${phoneNumber}`);
+                return phoneNumber + "@c.us";
+            }
+        } else {
+            return phoneNumber + "@c.us";
+        }
     }
     return phoneNumberObj.number.replace("+", "") + "@c.us";
 };
+
 
 const formatCurrency = (value) => `R$${value.toFixed(2).replace(".", ",")}`;
 
