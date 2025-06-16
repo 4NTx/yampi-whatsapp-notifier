@@ -3,6 +3,7 @@ const path = require("path");
 const logger = require("../utils/logger");
 const whatsappService = require("./whatsapp.service");
 const { parsePhoneNumberFromString } = require("libphonenumber-js");
+require('dotenv').config();
 
 const PIX_PAYMENT_ALIAS = "pix";
 const BOLETO_PAYMENT_ALIASES = ["boleto", "billet"];
@@ -61,7 +62,7 @@ const formatProductsList = (items) => {
 };
 
 const buildCartUrl = (items) => {
-    const baseUrl = "https://seguro.fuscashop.com/r/";
+    const baseUrl = process.env.BASE_URL;
     const params = items
         .map((item) => {
             const token = item.sku?.data?.token || "";
@@ -112,7 +113,7 @@ const processWebhook = async (payload) => {
 
         const shippingAddress = resource.shipping_address?.data || {};
         const shippingCode = resource.track_code || "";
-        const shippingUrl = "https://fuscashop.com/pages/rastrear-pedido";
+        const shippingUrl = process.env.SHIPPING_URL;
 
         let paymentMethodAlias = null;
         let pixExpirationDate = "";
