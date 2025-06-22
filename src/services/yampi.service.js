@@ -155,7 +155,7 @@ const processWebhook = async (payload) => {
             orderValue: totalWithDiscount.toFixed(2).replace(".", ","),
             totalWithoutDiscount: totalWithoutDiscount.toFixed(2).replace(".", ","),
             pixQrCode,
-            pixExpirationDate: pixExpirationDate ? `⚠️ Expira em: ${pixExpirationDate}` : "",
+            pixExpirationDate: pixExpirationDate ? `${pixExpirationDate}` : "",
             purchaseUrl,
             reorderUrl,
             boletoUrl,
@@ -165,84 +165,93 @@ const processWebhook = async (payload) => {
             shippingAddress,
         };
 
-        let messageToSend = null;
+        let messagesToSend = [];
 
         if (event === "cart.reminder") {
             if (resource.items?.data?.length > 0) {
-                messageToSend = fillTemplate(cartReminderMessages.reminder, {
+                messagesToSend.push(fillTemplate(cartReminderMessages.reminder, {
                     nome: customerName,
                     produto: productsList,
                     quantidade: resource.items.data.reduce((acc, item) => acc + (item.quantity || 0), 0),
                     valorTotalSemDesconto: totalWithoutDiscount.toFixed(2).replace(".", ","),
                     valorTotalComDesconto: totalWithDiscount.toFixed(2).replace(".", ","),
                     urlCompra: purchaseUrl,
-                });
+                }));
             }
         } else if (paymentMethodAlias === PIX_PAYMENT_ALIAS) {
             switch (event) {
                 case "order.created":
-                    if (orderStatusAlias === "waiting_payment")
-                        messageToSend = fillTemplate(pixMessages.waiting_payment, templateData);
+                    if (orderStatusAlias === "waiting_payment") {
+                        messagesToSend.push(fillTemplate(pixMessages.waiting_payment_part1, templateData));
+                        messagesToSend.push(fillTemplate(pixMessages.waiting_payment_pix_code, templateData));
+                        messagesToSend.push(fillTemplate(pixMessages.waiting_payment_part3, templateData));
+                    }
                     break;
                 case "order.paid":
-                    messageToSend = fillTemplate(pixMessages.paid, templateData);
+                    messagesToSend.push(fillTemplate(pixMessages.paid, templateData));
                     break;
                 case "order.status.updated":
                     if (orderStatusAlias === "cancelled")
-                        messageToSend = fillTemplate(pixMessages.cancelled, templateData);
+                        messagesToSend.push(fillTemplate(pixMessages.cancelled, templateData));
                     else if (orderStatusAlias === "on_carriage")
-                        messageToSend = fillTemplate(pixMessages.in_transit, templateData);
+                        messagesToSend.push(fillTemplate(pixMessages.in_transit, templateData));
                     else if (orderStatusAlias === "delivered")
-                        messageToSend = fillTemplate(pixMessages.delivered, templateData);
+                        messagesToSend.push(fillTemplate(pixMessages.delivered, templateData));
                     break;
                 case "transaction.payment.refused":
-                    messageToSend = fillTemplate(pixMessages.payment_refused, templateData);
+                    messagesToSend.push(fillTemplate(pixMessages.payment_refused, templateData));
                     break;
             }
         } else if (BOLETO_PAYMENT_ALIASES.includes(paymentMethodAlias)) {
             switch (event) {
                 case "order.created":
-                    messageToSend = fillTemplate(boletoMessages.created, templateData);
+                    messagesToSend.push(fillTemplate(boletoMessages.created_part1, templateData));
+                    messagesToSend.push(fillTemplate(boletoMessages.created_boleto_barcode, templateData));
+                    messagesToSend.push(fillTemplate(boletoMessages.created_part3, templateData));
                     break;
                 case "order.paid":
-                    messageToSend = fillTemplate(boletoMessages.paid, templateData);
+                    messagesToSend.push(fillTemplate(boletoMessages.paid, templateData));
                     break;
                 case "order.status.updated":
                     if (orderStatusAlias === "cancelled")
-                        messageToSend = fillTemplate(boletoMessages.cancelled, templateData);
+                        messagesToSend.push(fillTemplate(boletoMessages.cancelled, templateData));
                     else if (orderStatusAlias === "on_carriage")
-                        messageToSend = fillTemplate(boletoMessages.in_transit, templateData);
+                        messagesToSend.push(fillTemplate(boletoMessages.in_transit, templateData));
                     else if (orderStatusAlias === "delivered")
-                        messageToSend = fillTemplate(boletoMessages.delivered, templateData);
+                        messagesToSend.push(fillTemplate(boletoMessages.delivered, templateData));
                     break;
             }
         } else if (paymentMethodAlias === CREDIT_CARD_PAYMENT_ALIAS) {
             switch (event) {
                 case "order.created":
                     if (orderStatusAlias === "waiting_payment")
-                        messageToSend = fillTemplate(creditCardMessages.waiting_payment, templateData);
+                        messagesToSend.push(fillTemplate(creditCardMessages.waiting_payment, templateData));
                     break;
                 case "order.paid":
-                    messageToSend = fillTemplate(creditCardMessages.paid, templateData);
+                    messagesToSend.push(fillTemplate(creditCardMessages.paid, templateData));
                     break;
                 case "order.status.updated":
                     if (orderStatusAlias === "cancelled")
-                        messageToSend = fillTemplate(creditCardMessages.cancelled, templateData);
+                        messagesToSend.push(fillTemplate(creditCardMessages.cancelled, templateData));
                     else if (orderStatusAlias === "on_carriage")
-                        messageToSend = fillTemplate(creditCardMessages.in_transit, templateData);
+                        messagesToSend.push(fillTemplate(creditCardMessages.in_transit, templateData));
                     else if (orderStatusAlias === "delivered")
-                        messageToSend = fillTemplate(creditCardMessages.delivered, templateData);
+                        messagesToSend.push(fillTemplate(creditCardMessages.delivered, templateData));
                     break;
                 case "transaction.payment.refused":
-                    messageToSend = fillTemplate(creditCardMessages.payment_refused, templateData);
+                    messagesToSend.push(fillTemplate(creditCardMessages.payment_refused, templateData));
                     break;
             }
         }
 
-        if (messageToSend) {
-            await whatsappService.sendMessage(whatsappId, messageToSend);
-            logger.info(`Mensagem enviada para ${whatsappId} (Pedido ${orderId})`);
-        } else {
+        for (const message of messagesToSend) {
+            if (message) {
+                await whatsappService.sendMessage(whatsappId, message);
+                logger.info(`Mensagem enviada para ${whatsappId} (Pedido ${orderId})`);
+            }
+        }
+
+        if (messagesToSend.length === 0) {
             logger.info(`Evento ${event} sem template definido para pagamento ${paymentMethodAlias}`);
         }
     } catch (error) {
@@ -253,3 +262,5 @@ const processWebhook = async (payload) => {
 };
 
 module.exports = { processWebhook };
+
+
