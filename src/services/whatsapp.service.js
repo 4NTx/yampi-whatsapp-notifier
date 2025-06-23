@@ -1,14 +1,30 @@
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const fs = require("fs");
 const path = require("path");
 const logger = require("../utils/logger");
+const questionDetection = require("./question-detection.service");
+const qaDatabase = require("./qa-database.service");
 
 let client;
 let isClientReady = false;
 const QR_FILE_PATH = path.join(__dirname, "../../whatsapp_qr.txt");
+const UNMATCHED_QUESTIONS_LOG_PATH = path.join(__dirname, "../../logs/unmatched_questions.log");
 
-const initializeWhatsAppClient = () => {
-    logger.info("Inicializando cliente WhatsApp...");
+const QA_CONFIG = {
+    enabled: true,
+    similarityThreshold: 0.9,
+    fallbackMessage: "Desculpe, não entendi sua pergunta. Você pode reformular ou entrar em contato com nosso atendimento.",
+    processingMessage: "🤖 Processando sua pergunta...",
+    enableProcessingMessage: false,
+    delayBetweenResponses: 3000,
+    audioAsVoiceNote: true,
+    videoAsDocument: true, // n ta funfando
+    sendVideoAsUrlFallback: false, // n ta funfando
+    sendFallbackMessage: false
+};
+
+const initializeWhatsAppClient = async () => {
+    logger.info("Inicializando cliente WhatsApp com sistema Q&A...");
 
     if (fs.existsSync(QR_FILE_PATH)) {
         try {
@@ -45,9 +61,16 @@ const initializeWhatsAppClient = () => {
         }
     });
 
-    client.on("ready", () => {
+    client.on("ready", async () => {
         isClientReady = true;
         logger.info("Cliente WhatsApp está pronto!");
+
+        try {
+            await initializeQAServices();
+        } catch (error) {
+            logger.error("Erro ao inicializar serviços Q&A:", error);
+        }
+
         if (fs.existsSync(QR_FILE_PATH)) {
             try {
                 fs.unlinkSync(QR_FILE_PATH);
@@ -72,12 +95,224 @@ const initializeWhatsAppClient = () => {
         logger.error("Erro no cliente WhatsApp:", err);
     });
 
+    client.on("message", async (message) => {
+        if (QA_CONFIG.enabled) {
+            await handleIncomingMessage(message);
+        }
+    });
+
     client.initialize().catch(error => {
         logger.error("Erro ao inicializar cliente WhatsApp:", error);
         isClientReady = false;
     });
 };
 
+/**
+ * Inicializa os serviços de Q&A
+ */
+const initializeQAServices = async () => {
+    try {
+        logger.info("Inicializando serviços Q&A...");
+
+        await qaDatabase.initialize();
+        await questionDetection.initialize();
+
+        questionDetection.setSimilarityThreshold(QA_CONFIG.similarityThreshold);
+
+        logger.info("Serviços Q&A inicializados com sucesso");
+    } catch (error) {
+        logger.error("Erro ao inicializar serviços Q&A:", error);
+        throw error;
+    }
+};
+
+/**
+ * Processa mensagens recebidas para o sistema Q&A
+ */
+const handleIncomingMessage = async (message) => {
+    try {
+        if (message.fromMe) {
+            return;
+        }
+
+        const chat = await message.getChat();
+        if (chat.isGroup) {
+            logger.info("Mensagem de grupo ignorada");
+            return;
+        }
+
+        if (message.type !== "chat") {
+            logger.info(`Tipo de mensagem não suportado: ${message.type}`);
+            return;
+        }
+
+        const userMessage = message.body.trim();
+        const fromNumber = message.from;
+
+        logger.info(`Mensagem recebida de ${fromNumber}: "${userMessage}"`);
+
+        if (QA_CONFIG.enableProcessingMessage) {
+            await sendMessage(fromNumber, QA_CONFIG.processingMessage);
+        }
+
+        const questions = qaDatabase.getAllQuestions();
+
+        const detection = await questionDetection.detectQuestion(userMessage, questions);
+
+        if (detection.isQuestion && detection.matchedQuestion) {
+            logger.info(`Pergunta detectada com similaridade ${detection.similarity}`);
+
+            const responses = detection.matchedQuestion.respostas.filter(r => r.ativo);
+
+            await sendMultipleResponses(fromNumber, responses);
+
+        } else {
+            logUnmatchedQuestion(userMessage);
+
+            if (QA_CONFIG.sendFallbackMessage) {
+                logger.info(`Pergunta não reconhecida ou similaridade baixa (${detection.similarity}). Enviando fallback.`);
+                await sendMessage(fromNumber, QA_CONFIG.fallbackMessage);
+            } else {
+                logger.info(`Pergunta não reconhecida ou similaridade baixa (${detection.similarity}). Nenhuma mensagem de fallback enviada.`);
+            }
+        }
+
+    } catch (error) {
+        logger.error("Erro ao processar mensagem recebida:", error);
+
+        if (QA_CONFIG.sendFallbackMessage) {
+            try {
+                await sendMessage(message.from, "Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente.");
+            } catch (sendError) {
+                logger.error("Erro ao enviar mensagem de erro:", sendError);
+            }
+        }
+    }
+};
+
+/**
+ * Loga perguntas que não foram correspondidas.
+ */
+const logUnmatchedQuestion = (question) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = `${timestamp} - ${question}\n`;
+    fs.appendFile(UNMATCHED_QUESTIONS_LOG_PATH, logEntry, (err) => {
+        if (err) {
+            logger.error("Erro ao logar pergunta não correspondida:", err);
+        }
+    });
+    logger.info(`Pergunta não correspondida logada: "${question}"`);
+};
+
+/**
+ * Envia múltiplas respostas com delay entre elas
+ */
+const sendMultipleResponses = async (number, responses) => {
+    try {
+        for (let i = 0; i < responses.length; i++) {
+            const response = responses[i];
+            await sendResponse(number, response);
+            if (i < responses.length - 1) {
+                const delay = QA_CONFIG.delayBetweenResponses;
+                logger.info(`Aguardando ${delay}ms antes da próxima resposta...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        logger.info(`${responses.length} resposta(s) enviada(s) com sucesso para ${number}`);
+
+    } catch (error) {
+        logger.error("Erro ao enviar múltiplas respostas:", error);
+        throw error;
+    }
+};
+
+/**
+ * Envia uma resposta baseada no tipo
+ */
+const sendResponse = async (number, response) => {
+    try {
+        switch (response.tipo) {
+            case "texto":
+                await sendMessage(number, response.conteudo);
+                break;
+
+            case "audio":
+                if (response.caminho_arquivo && qaDatabase.validateMediaFile(response.caminho_arquivo)) {
+                    await sendMediaMessage(number, response.caminho_arquivo, "audio", response.conteudo, {
+                        sendAsVoiceNote: QA_CONFIG.audioAsVoiceNote
+                    });
+                } else {
+                    logger.warn(`Arquivo de áudio não encontrado: ${response.caminho_arquivo}`);
+                    if (response.conteudo) {
+                        await sendMessage(number, response.conteudo);
+                    } else {
+                        await sendMessage(number, "Áudio não disponível no momento.");
+                    }
+                }
+                break;
+
+            case "imagem":
+                if (response.caminho_arquivo && qaDatabase.validateMediaFile(response.caminho_arquivo)) {
+                    await sendMediaMessage(number, response.caminho_arquivo, "image", response.conteudo);
+                } else {
+                    logger.warn(`Arquivo de imagem não encontrado: ${response.caminho_arquivo}`);
+                    if (response.conteudo) {
+                        await sendMessage(number, response.conteudo);
+                    } else {
+                        await sendMessage(number, "Imagem não disponível no momento.");
+                    }
+                }
+                break;
+
+            case "video":
+                if (response.caminho_arquivo) {
+                    try {
+                        if (qaDatabase.validateMediaFile(response.caminho_arquivo)) {
+                            await sendMediaMessage(number, response.caminho_arquivo, "video", response.conteudo, {
+                                sendAsDocument: QA_CONFIG.videoAsDocument
+                            });
+                        } else if (QA_CONFIG.sendVideoAsUrlFallback && isValidUrl(response.caminho_arquivo)) {
+                            await sendMessage(number, response.caminho_arquivo + (response.conteudo ? `\n${response.conteudo}` : ""));
+                            logger.info(`Vídeo enviado como URL: ${response.caminho_arquivo}`);
+                        } else {
+                            logger.warn(`Arquivo de vídeo não encontrado ou URL inválida: ${response.caminho_arquivo}`);
+                            if (response.conteudo) {
+                                await sendMessage(number, response.conteudo);
+                            } else {
+                                await sendMessage(number, "Vídeo não disponível no momento.");
+                            }
+                        }
+                    } catch (fileSendError) {
+                        logger.error(`Erro ao enviar vídeo como arquivo/documento: ${fileSendError.message}. Tentando como URL...`);
+                        if (QA_CONFIG.sendVideoAsUrlFallback && isValidUrl(response.caminho_arquivo)) {
+                            await sendMessage(number, response.caminho_arquivo + (response.conteudo ? `\n${response.conteudo}` : ""));
+                            logger.info(`Vídeo enviado como URL (fallback): ${response.caminho_arquivo}`);
+                        } else {
+                            throw fileSendError;
+                        }
+                    }
+                } else {
+                    logger.warn(`Caminho do arquivo de vídeo não especificado.`);
+                    if (response.conteudo) {
+                        await sendMessage(number, response.conteudo);
+                    } else {
+                        await sendMessage(number, "Vídeo não disponível no momento.");
+                    }
+                }
+                break;
+
+            default:
+                logger.warn(`Tipo de resposta não suportado: ${response.tipo}`);
+                if (response.conteudo) {
+                    await sendMessage(number, response.conteudo);
+                }
+        }
+    } catch (error) {
+        logger.error(`Erro ao enviar resposta do tipo ${response.tipo}:`, error);
+        throw error;
+    }
+};
 
 let queue = [];
 let isProcessingQueue = false;
@@ -88,7 +323,7 @@ const processQueue = async () => {
     isProcessingQueue = true;
 
     while (queue.length > 0) {
-        const { number, message, resolve, reject } = queue.shift();
+        const { number, message, media, options, resolve, reject } = queue.shift();
 
         try {
             if (!isClientReady) {
@@ -99,14 +334,28 @@ const processQueue = async () => {
             logger.info(`Enviando mensagem para ${number}`);
 
             const chat = await client.getChatById(number);
-            if (chat) {
-                await chat.sendMessage(message);
+
+            if (media) {
+                const sendOptions = { caption: message };
+
+                if (options && options.sendAsVoiceNote && media.mimetype && media.mimetype.startsWith("audio/")) {
+                    sendOptions.sendAudioAsVoice = true;
+                }
+
+                if (options && options.sendAsDocument && media.mimetype && media.mimetype.startsWith("video/")) {
+                    sendOptions.sendAsDocument = true;
+                }
+
+                await chat.sendMessage(media, sendOptions);
             } else {
-                await client.sendMessage(number, message);
+                if (chat) {
+                    await chat.sendMessage(message);
+                } else {
+                    await client.sendMessage(number, message);
+                }
             }
 
             logger.info(`Mensagem enviada com sucesso para ${number}`);
-
             resolve();
 
         } catch (error) {
@@ -119,6 +368,10 @@ const processQueue = async () => {
 
     isProcessingQueue = false;
 };
+
+/**
+ * Envia mensagem de texto
+ */
 const sendMessage = (number, message) => {
     return new Promise((resolve, reject) => {
         queue.push({ number, message, resolve, reject });
@@ -126,8 +379,203 @@ const sendMessage = (number, message) => {
     });
 };
 
+/**
+ * Envia mensagem com mídia (áudio, imagem, vídeo)
+ */
+const sendMediaMessage = (number, filePath, mediaType, caption = "", options = {}) => {
+    return new Promise((resolve, reject) => {
+        try {
+            let fullPath = filePath;
+            if (!path.isAbsolute(filePath)) {
+                fullPath = path.resolve(filePath);
+            }
+
+            if (!fs.existsSync(fullPath)) {
+                throw new Error(`Arquivo não encontrado: ${fullPath}`);
+            }
+
+            const media = MessageMedia.fromFilePath(fullPath);
+
+            if (mediaType === "video") {
+                media.mimetype = "video/mp4";
+            }
+
+            queue.push({
+                number,
+                message: caption,
+                media,
+                options,
+                resolve,
+                reject
+            });
+            processQueue();
+        } catch (error) {
+            reject(error);
+        }
+    });
+};
+
+/**
+ * Valida se uma string é uma URL válida
+ */
+const isValidUrl = (string) => {
+    try {
+        new URL(string);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+/**
+ * Configurações do sistema Q&A
+ */
+const updateQAConfig = (newConfig) => {
+    Object.assign(QA_CONFIG, newConfig);
+
+    if (newConfig.delayBetweenResponses !== undefined) {
+        qaDatabase.setDefaultDelayBetweenResponses(newConfig.delayBetweenResponses);
+    }
+
+    if (newConfig.similarityThreshold !== undefined && questionDetection.isInitialized) {
+        questionDetection.setSimilarityThreshold(newConfig.similarityThreshold);
+    }
+
+    logger.info("Configurações Q&A atualizadas:", QA_CONFIG);
+};
+
+const getQAConfig = () => {
+    return { ...QA_CONFIG };
+};
+
+/**
+ * Adiciona nova pergunta ao sistema
+ */
+const addQuestion = async (perguntaTexto, respostas) => {
+    try {
+        const novaPergunta = await qaDatabase.addQuestion(perguntaTexto, respostas);
+        logger.info(`Nova pergunta adicionada ao sistema Q&A: ${perguntaTexto}`);
+        return novaPergunta;
+    } catch (error) {
+        logger.error("Erro ao adicionar pergunta:", error);
+        throw error;
+    }
+};
+
+/**
+ * Atualiza uma pergunta existente
+ */
+const updateQuestion = async (id, updates) => {
+    try {
+        const perguntaAtualizada = await qaDatabase.updateQuestion(id, updates);
+        logger.info(`Pergunta atualizada no sistema Q&A: ${id}`);
+        return perguntaAtualizada;
+    } catch (error) {
+        logger.error("Erro ao atualizar pergunta:", error);
+        throw error;
+    }
+};
+
+/**
+ * Remove uma pergunta
+ */
+const removeQuestion = async (id) => {
+    try {
+        const perguntaRemovida = await qaDatabase.removeQuestion(id);
+        logger.info(`Pergunta removida do sistema Q&A: ${id}`);
+        return perguntaRemovida;
+    } catch (error) {
+        logger.error("Erro ao remover pergunta:", error);
+        throw error;
+    }
+};
+
+/**
+ * Lista todas as perguntas
+ */
+const listQuestions = () => {
+    try {
+        return qaDatabase.getAllQuestions();
+    } catch (error) {
+        logger.error("Erro ao listar perguntas:", error);
+        throw error;
+    }
+};
+
+/**
+ * Busca pergunta por ID
+ */
+const getQuestionById = (id) => {
+    try {
+        return qaDatabase.getQuestionById(id);
+    } catch (error) {
+        logger.error("Erro ao buscar pergunta por ID:", error);
+        throw error;
+    }
+};
+
+/**
+ * Estatísticas do sistema Q&A
+ */
+const getQAStats = () => {
+    try {
+        return qaDatabase.getStats();
+    } catch (error) {
+        logger.error("Erro ao obter estatísticas:", error);
+        throw error;
+    }
+};
+
+/**
+ * Lista arquivos de mídia disponíveis
+ */
+const listMediaFiles = (tipo) => {
+    try {
+        return qaDatabase.listMediaFiles(tipo);
+    } catch (error) {
+        logger.error("Erro ao listar arquivos de mídia:", error);
+        throw error;
+    }
+};
+
+/**
+ * Testa uma pergunta no sistema
+ */
+const testQuestion = async (pergunta) => {
+    try {
+        const questions = qaDatabase.getAllQuestions();
+        const detection = await questionDetection.detectQuestion(pergunta, questions);
+
+        return {
+            pergunta_original: pergunta,
+            is_question: detection.isQuestion,
+            similarity: detection.similarity,
+            confidence: detection.confidence,
+            matched_question: detection.matchedQuestion ? {
+                id: detection.matchedQuestion.id,
+                pergunta_texto: detection.matchedQuestion.pergunta_texto,
+                respostas: detection.matchedQuestion.respostas
+            } : null
+        };
+    } catch (error) {
+        logger.error("Erro ao testar pergunta:", error);
+        throw error;
+    }
+};
+
 module.exports = {
     initializeWhatsAppClient,
     sendMessage,
+    sendMediaMessage,
+    updateQAConfig,
+    getQAConfig,
+    addQuestion,
+    updateQuestion,
+    removeQuestion,
+    listQuestions,
+    getQuestionById,
+    getQAStats,
+    listMediaFiles,
+    testQuestion,
     QR_FILE_PATH
 };
