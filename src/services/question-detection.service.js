@@ -1,128 +1,107 @@
-const { spawn } = require("child_process");
-const path = require("path");
 const logger = require("../utils/logger");
+const qaDatabase = require("../services/qa-database.service"); // Adicionado para depuração
 
 class QuestionDetectionService {
     constructor() {
-        // Caminho explícito para o executável Python do Miniconda (INSTALA ESSA MERDA E PROCURA NO TEU PC)
-        // ATENÇÃO: Substitua este caminho pelo caminho correto do seu python.exe do Miniconda
-        this.pythonExecutablePath = "C:\\Users\\artur\\miniconda4\\python.exe";
-        this.pythonScriptPath = path.join(__dirname, "question_detector.py");
         this.isInitialized = false;
-        this.similarityThreshold = 0.8;
     }
 
-    /**
-     * Inicializa o serviço de detecção de perguntas
-     */
     async initialize() {
         try {
-            logger.info("Inicializando serviço de detecção de perguntas...");
-            
-            const testResult = await this.runPythonScript("test", []);
-            
-            if (testResult.success) {
-                this.isInitialized = true;
-                logger.info("Serviço de detecção de perguntas inicializado com sucesso");
-            } else {
-                throw new Error(`Falha ao inicializar: ${testResult.error}`);
-            }
+            logger.info("Inicializando serviço de detecção de perguntas (modo frases gatilho)...");
+            this.isInitialized = true;
+            logger.info("Serviço de detecção de perguntas inicializado com sucesso.");
         } catch (error) {
             logger.error("Erro ao inicializar serviço de detecção de perguntas:", error);
             throw error;
         }
     }
 
-    /**
-     * Detecta se uma mensagem é uma pergunta e encontra a resposta mais similar
-     * @param {string} userMessage - Mensagem do usuário
-     * @param {Array} questionsDatabase - Array de perguntas cadastradas
-     * @returns {Object} Resultado da detecção
-     */
-    async detectQuestion(userMessage, questionsDatabase) {
-        if (!this.isInitialized) {
-            throw new Error("Serviço não foi inicializado. Chame initialize() primeiro.");
-        }
+    setSimilarityThreshold(threshold) {
+        logger.info(`Limiar de similaridade definido para: ${threshold} (não usado no modo frases gatilho)`);
+    }
 
+    normalizeText(text) {
+        return text
+            .toLowerCase()
+            .trim()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^\w\s]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    async detectQuestion(userMessage, questions) {
         try {
-            logger.info(`Detectando pergunta: "${userMessage}"`);
-
-            const result = await this.runPythonScript("detect", [
-                userMessage,
-                JSON.stringify(questionsDatabase),
-                this.similarityThreshold.toString()
-            ]);
-
-            if (result.success) {
-                const detection = JSON.parse(result.output);
-                
-                logger.info(`Resultado da detecção:`, {
-                    isQuestion: detection.is_question,
-                    similarity: detection.similarity,
-                    matchedQuestionId: detection.matched_question_id
-                });
-
-                return {
-                    isQuestion: detection.is_question,
-                    similarity: detection.similarity,
-                    matchedQuestion: detection.matched_question,
-                    confidence: detection.similarity >= this.similarityThreshold ? "high" : "low"
-                };
-            } else {
-                throw new Error(`Erro na detecção: ${result.error}`);
+            if (!this.isInitialized) {
+                throw new Error("Serviço de detecção de perguntas não foi inicializado.");
             }
+
+            const normalizedUserMessage = this.normalizeText(userMessage);
+            logger.info(`[DETECTION DEBUG] Mensagem do usuário normalizada: "${normalizedUserMessage}"`);
+
+            logger.info(`[DETECTION DEBUG] Perguntas carregadas para detecção: ${JSON.stringify(questions.map(q => ({ id: q.id, pergunta_texto: q.pergunta_texto, trigger_phrases: q.trigger_phrases })))}`);
+
+            for (const question of questions) {
+                const triggerPhrases = question.trigger_phrases || [question.pergunta_texto];
+
+                for (const triggerPhrase of triggerPhrases) {
+                    const normalizedTrigger = this.normalizeText(triggerPhrase);
+                    logger.info(`[DETECTION DEBUG] Comparando "${normalizedUserMessage}" com frase gatilho normalizada: "${normalizedTrigger}" (da pergunta ID: ${question.id})`);
+
+                    if (normalizedUserMessage === normalizedTrigger) {
+                        logger.info(`[DETECTION DEBUG] Correspondência EXATA encontrada!`);
+                        return {
+                            isQuestion: true,
+                            similarity: 1.0,
+                            confidence: 1.0,
+                            matchedQuestion: question,
+                            matchedQuestionId: question.id,
+                            matchedTriggerPhrase: triggerPhrase
+                        };
+                    }
+
+                    if (normalizedUserMessage.includes(normalizedTrigger)) {
+                        logger.info(`[DETECTION DEBUG] Correspondência CONTÉM encontrada!`);
+                        return {
+                            isQuestion: true,
+                            similarity: 0.8,
+                            confidence: 0.8,
+                            matchedQuestion: question,
+                            matchedQuestionId: question.id,
+                            matchedTriggerPhrase: triggerPhrase
+                        };
+                    }
+
+                    if (normalizedTrigger.includes(normalizedUserMessage) && normalizedUserMessage.length >= 3) {
+                        logger.info(`[DETECTION DEBUG] Correspondência ESTÁ CONTIDA encontrada!`);
+                        return {
+                            isQuestion: true,
+                            similarity: 0.6,
+                            confidence: 0.6,
+                            matchedQuestion: question,
+                            matchedQuestionId: question.id,
+                            matchedTriggerPhrase: triggerPhrase
+                        };
+                    }
+                }
+            }
+
+            logger.info(`[DETECTION DEBUG] Nenhuma correspondência encontrada para "${normalizedUserMessage}".`);
+            return {
+                isQuestion: false,
+                similarity: 0.0,
+                confidence: 0.0,
+                matchedQuestion: null,
+                matchedQuestionId: null,
+                matchedTriggerPhrase: null
+            };
+
         } catch (error) {
             logger.error("Erro ao detectar pergunta:", error);
             throw error;
         }
-    }
-
-    /**
-     * Atualiza o limiar de similaridade
-     * @param {number} threshold - Novo limiar (0.0 a 1.0)
-     */
-    setSimilarityThreshold(threshold) {
-        if (threshold >= 0 && threshold <= 1) {
-            this.similarityThreshold = threshold;
-            logger.info(`Limiar de similaridade atualizado para: ${threshold}`);
-        } else {
-            throw new Error("Limiar deve estar entre 0.0 e 1.0");
-        }
-    }
-
-    /**
-     * Executa o script Python para detecção de perguntas
-     * @param {string} command - Comando a ser executado
-     * @param {Array} args - Argumentos para o comando
-     * @returns {Promise<Object>} Resultado da execução
-     */
-    runPythonScript(command, args) {
-        return new Promise((resolve) => {
-            const pythonProcess = spawn(this.pythonExecutablePath, [this.pythonScriptPath, command, ...args]);
-            
-            let output = "";
-            let error = "";
-
-            pythonProcess.stdout.on("data", (data) => {
-                output += data.toString("utf8"); 
-            });
-
-            pythonProcess.stderr.on("data", (data) => {
-                error += data.toString("utf8");
-            });
-
-            pythonProcess.on("close", (code) => {
-                if (code === 0) {
-                    resolve({ success: true, output: output.trim() });
-                } else {
-                    resolve({ success: false, error: error.trim() || `Processo terminou com código ${code}` });
-                }
-            });
-
-            pythonProcess.on("error", (err) => {
-                resolve({ success: false, error: err.message });
-            });
-        });
     }
 }
 

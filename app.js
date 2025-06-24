@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
-const yampiRoutes = require("./src/routes/yampi.routes");
-const qaRoutes = require("./src/routes/qa.routes");
+const yampiRoutes = require("./src/data/routes/yampi.routes");
+const qaRoutes = require("./src/data/routes/qa.routes");
 const logger = require("./src/utils/logger");
 const { initializeWhatsAppClient } = require("./src/services/whatsapp.service");
 
@@ -18,11 +18,10 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (req, res) => {
-    res.send("Yampi Webhook Notifier com Sistema Q&A está rodando!");
+    res.send("Sistema Q&A WhatsApp está rodando!");
 });
 
 app.use("/webhook", yampiRoutes);
-
 app.use("/qa", qaRoutes);
 
 app.use((req, res, next) => {
@@ -36,7 +35,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, "0.0.0.0", () => {
     logger.info(`Servidor rodando em http://0.0.0.0:${PORT}`);
-    logger.info("Sistema Q&A ativado - O bot responderá automaticamente às perguntas dos usuários");
 });
 
 process.on("SIGTERM", () => {
@@ -48,3 +46,4 @@ process.on("SIGINT", () => {
     logger.info("SIGINT signal received: closing HTTP server");
     process.exit(0);
 });
+

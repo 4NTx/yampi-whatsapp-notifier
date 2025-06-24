@@ -1,52 +1,63 @@
-[
-  {
-    "id": "591d16ed-90a9-4f77-af57-73140676cf8d",
-    "pergunta_texto": "4NT",
-    "pergunta_embedding": [],
-    "respostas": [
-      {
-        "tipo": "texto",
-        "conteudo": "Isto aqui é um Texto",
-        "caminho_arquivo": null,
-        "ativo": true
-      },
-      {
-        "tipo": "audio",
-        "conteudo": "Isto aqui é um Audio",
-        "caminho_arquivo": "./src/data/media/audio/file_example_MP3_2MG.mp3",
-        "ativo": true
-      },
-      {
-        "tipo": "imagem",
-        "conteudo": "Isto aqui é uma Imagem",
-        "caminho_arquivo": "./src/data/media/imagem/baixados.jpeg",
-        "ativo": true
-      },
-      {
-        "tipo": "video",
-        "conteudo": "Isto aqui é um Video E NÃO ESTÁ FUNCIONANDO",
-        "caminho_arquivo": "./src/data/media/video/SampleVideo_1280x720_1mb.mp4",
-        "ativo": false
-      }
-    ],
-    "criado_em": "2025-06-23T21:32:34.299Z",
-    "atualizado_em": "2025-06-23T21:32:34.299Z",
-    "ativo": true
-  },
-  {
-    "id": "033f3b81-a3b3-407f-83fe-ac9c77dafde3",
-    "pergunta_texto": "Bolsonaro",
-    "pergunta_embedding": [],
-    "respostas": [
-      {
-        "tipo": "texto",
-        "conteudo": "Para cancelar seu pedido, entre em contato conosco o mais rápido possível. Se o pedido ainda não foi processado, poderemos cancelá-lo sem problemas.",
-        "caminho_arquivo": null,
-        "ativo": true
-      }
-    ],
-    "criado_em": "2025-06-23T21:32:34.299Z",
-    "atualizado_em": "2025-06-23T21:32:34.299Z",
-    "ativo": true
-  }
-]
+{
+  "questions": [
+    {
+      "id": "591d16ed-90a9-4f77-af57-73140676cf8d",
+      "pergunta_texto": "4NT",
+      "trigger_phrases": [
+        "4NT",
+        "qual o 4nt",
+        "meu 4nt",
+        "status 4nt"
+      ],
+      "respostas": [
+        {
+          "tipo": "texto",
+          "conteudo": "Isto aqui é um Texto",
+          "caminho_arquivo": null,
+          "ativo": true
+        },
+        {
+          "tipo": "audio",
+          "conteudo": "Isto aqui é um Audio",
+          "caminho_arquivo": "./src/data/media/audio/file_example_MP3_2MG.mp3",
+          "ativo": true
+        },
+        {
+          "tipo": "imagem",
+          "conteudo": "Isto aqui é uma Imagem",
+          "caminho_arquivo": "./src/data/media/imagem/baixados.jpeg",
+          "ativo": true
+        },
+        {
+          "tipo": "video",
+          "conteudo": "Isto aqui é um Video E NÃO ESTÁ FUNCIONANDO",
+          "caminho_arquivo": "./src/data/media/video/SampleVideo_1280x720_1mb.mp4",
+          "ativo": false
+        }
+      ],
+      "criado_em": "2025-06-23T21:32:34.299Z",
+      "atualizado_em": "2025-06-23T21:32:34.299Z",
+      "ativo": true
+    },
+    {
+      "id": "033f3b81-a3b3-407f-83fe-ac9c77dafde3",
+      "pergunta_texto": "Bolsonaro",
+      "trigger_phrases": [
+        "Presidente",
+        "bozo",
+        "Bolsonaro presidente"
+      ],
+      "respostas": [
+        {
+          "tipo": "texto",
+          "conteudo": "Fale do presidente fale",
+          "caminho_arquivo": null,
+          "ativo": true
+        }
+      ],
+      "criado_em": "2025-06-23T21:32:34.299Z",
+      "atualizado_em": "2025-06-23T21:32:34.299Z",
+      "ativo": true
+    }
+  ]
+}

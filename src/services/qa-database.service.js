@@ -3,471 +3,171 @@ const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const logger = require("../utils/logger");
 
-class QADatabaseService {
-    constructor() {
-        this.dbPath = path.join(__dirname, "../data/qa_database.json");
-        this.mediaPath = path.join(__dirname, "../data/media");
-        this.database = [];
-        this.isInitialized = false;
-        this.defaultDelayBetweenResponses = 3000;
-        this.ensureDirectories();
-    }
+const DB_FILE = path.join(__dirname, "../data/qa_database.json");
+const MEDIA_BASE_PATH = path.join(__dirname, "../data/media");
 
-    /**
-     * Garante que os diretórios necessários existam
-     */
-    ensureDirectories() {
-        const dataDir = path.dirname(this.dbPath);
+let qaDatabase = { questions: [] };
+let defaultDelayBetweenResponses = 2000;
 
-        if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true });
-            logger.info(`Diretório criado: ${dataDir}`);
-        }
+const initialize = async () => {
+    try {
+        logger.info("[DB DEBUG] Tentando inicializar banco de dados Q&A...");
+        if (fs.existsSync(DB_FILE)) {
+            logger.info(`[DB DEBUG] Arquivo de banco de dados encontrado: ${DB_FILE}`);
+            const data = fs.readFileSync(DB_FILE, "utf8");
+            const parsedData = JSON.parse(data);
 
-        if (!fs.existsSync(this.mediaPath)) {
-            fs.mkdirSync(this.mediaPath, { recursive: true });
-            logger.info(`Diretório de mídia criado: ${this.mediaPath}`);
-        }
+            qaDatabase.questions = Array.isArray(parsedData.questions) ? parsedData.questions : [];
+            logger.info(`[DB DEBUG] ${qaDatabase.questions.length} perguntas carregadas do arquivo.`);
 
-        const mediaTypes = ["audio", "imagem", "video"];
-        mediaTypes.forEach(type => {
-            const typeDir = path.join(this.mediaPath, type);
-            if (!fs.existsSync(typeDir)) {
-                fs.mkdirSync(typeDir, { recursive: true });
-                logger.info(`Diretório criado: ${typeDir}`);
-            }
-        });
-    }
-
-    /**
-     * Inicializa o banco de dados
-     */
-    async initialize() {
-        try {
-            logger.info("Inicializando banco de dados Q&A...");
-
-            if (fs.existsSync(this.dbPath)) {
-                const data = fs.readFileSync(this.dbPath, "utf8");
-                this.database = JSON.parse(data);
-                logger.info(`Banco de dados carregado com ${this.database.length} entradas`);
-            } else {
-                this.database = this.createInitialDatabase();
-                await this.saveDatabase();
-                logger.info("Banco de dados inicial criado");
-            }
-
-            this.isInitialized = true;
-            logger.info("Banco de dados Q&A inicializado com sucesso");
-
-        } catch (error) {
-            logger.error("Erro ao inicializar banco de dados Q&A:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Cria banco de dados inicial com perguntas de exemplo
-     */
-    createInitialDatabase() {
-        return [
-            {
-                id: uuidv4(),
-                pergunta_texto: "Qual o status do meu pedido?",
-                pergunta_embedding: [],
-                respostas: [
-                    {
-                        tipo: "texto",
-                        conteudo: "Para verificar o status do seu pedido, você pode acessar nossa página de rastreamento ou aguardar as atualizações automáticas que enviamos via WhatsApp.",
-                        caminho_arquivo: null,
-                        ativo: true
-                    }
-                ],
-                criado_em: new Date().toISOString(),
-                atualizado_em: new Date().toISOString(),
-                ativo: true
-            },
-            {
-                id: uuidv4(),
-                pergunta_texto: "Como faço para cancelar meu pedido?",
-                pergunta_embedding: [],
-                respostas: [
-                    {
-                        tipo: "texto",
-                        conteudo: "Para cancelar seu pedido, entre em contato conosco o mais rápido possível. Se o pedido ainda não foi processado, poderemos cancelá-lo sem problemas.",
-                        caminho_arquivo: null,
-                        ativo: true
-                    }
-                ],
-                criado_em: new Date().toISOString(),
-                atualizado_em: new Date().toISOString(),
-                ativo: true
-            },
-            {
-                id: uuidv4(),
-                pergunta_texto: "Quais são as formas de pagamento?",
-                pergunta_embedding: [],
-                respostas: [
-                    {
-                        tipo: "texto",
-                        conteudo: "Aceitamos PIX, cartão de crédito e boleto bancário. O PIX tem aprovação instantânea, cartão é processado rapidamente, e boleto pode levar até 3 dias úteis para compensar.",
-                        caminho_arquivo: null,
-                        ativo: true
-                    }
-                ],
-                criado_em: new Date().toISOString(),
-                atualizado_em: new Date().toISOString(),
-                ativo: true
-            },
-            {
-                id: uuidv4(),
-                pergunta_texto: "Quanto tempo demora para entregar?",
-                pergunta_embedding: [],
-                respostas: [
-                    {
-                        tipo: "texto",
-                        conteudo: "O prazo de entrega varia conforme sua região. Geralmente é de 5 a 15 dias úteis. Você receberá o código de rastreamento assim que o produto for despachado.",
-                        caminho_arquivo: null,
-                        ativo: true
-                    }
-                ],
-                criado_em: new Date().toISOString(),
-                atualizado_em: new Date().toISOString(),
-                ativo: true
-            }
-        ];
-    }
-
-    /**
-     * Salva o banco de dados no arquivo
-     */
-    async saveDatabase() {
-        try {
-            const data = JSON.stringify(this.database, null, 2);
-            fs.writeFileSync(this.dbPath, data, "utf8");
-            logger.info("Banco de dados salvo com sucesso");
-        } catch (error) {
-            logger.error("Erro ao salvar banco de dados:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Recarrega o banco de dados do arquivo (útil para atualizações em tempo real)
-     */
-    async reloadDatabase() {
-        try {
-            if (fs.existsSync(this.dbPath)) {
-                const data = fs.readFileSync(this.dbPath, "utf8");
-                this.database = JSON.parse(data);
-                logger.info(`Banco de dados recarregado com ${this.database.length} entradas`);
-                return true;
-            }
-            return false;
-        } catch (error) {
-            logger.error("Erro ao recarregar banco de dados:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Retorna todas as perguntas ativas (sempre recarrega do arquivo)
-     */
-    getAllQuestions() {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        this.reloadDatabase();
-
-        return this.database.filter(item => item.ativo);
-    }
-
-    /**
-     * Adiciona uma nova pergunta e resposta
-     */
-    async addQuestion(perguntaTexto, respostas) {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        try {
-            const respostasNormalizadas = respostas.map(resposta => {
-                const respostaNormalizada = {
-                    tipo: resposta.tipo,
-                    conteudo: resposta.conteudo || null,
-                    caminho_arquivo: resposta.caminho_arquivo || null,
-                    ativo: resposta.ativo !== undefined ? resposta.ativo : true
-                };
-
-                if (!["texto", "audio", "imagem", "video"].includes(respostaNormalizada.tipo)) {
-                    throw new Error(`Tipo de resposta inválido: ${respostaNormalizada.tipo}`);
+            let needsSave = false;
+            for (const question of qaDatabase.questions) {
+                if (!question.trigger_phrases) {
+                    question.trigger_phrases = [question.pergunta_texto];
+                    needsSave = true;
+                    logger.info(`[DB DEBUG] Migrando pergunta ID ${question.id}: adicionando trigger_phrases.`);
                 }
-
-                if (["audio", "imagem", "video"].includes(respostaNormalizada.tipo) && !respostaNormalizada.caminho_arquivo) {
-                    throw new Error(`Respostas do tipo ${respostaNormalizada.tipo} devem ter caminho_arquivo`);
+                if (question.pergunta_embedding) {
+                    delete question.pergunta_embedding;
+                    needsSave = true;
+                    logger.info(`[DB DEBUG] Migrando pergunta ID ${question.id}: removendo pergunta_embedding.`);
                 }
-
-                if (respostaNormalizada.tipo === "texto" && !respostaNormalizada.conteudo) {
-                    throw new Error("Respostas do tipo texto devem ter conteúdo");
-                }
-
-                return respostaNormalizada;
-            });
-
-            const novaEntrada = {
-                id: uuidv4(),
-                pergunta_texto: perguntaTexto,
-                pergunta_embedding: [],
-                respostas: respostasNormalizadas,
-                criado_em: new Date().toISOString(),
-                atualizado_em: new Date().toISOString(),
-                ativo: true
-            };
-
-            await this.reloadDatabase();
-
-            this.database.push(novaEntrada);
-            await this.saveDatabase();
-
-            logger.info(`Nova pergunta adicionada: ${perguntaTexto}`);
-            return novaEntrada;
-
-        } catch (error) {
-            logger.error("Erro ao adicionar pergunta:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Atualiza uma pergunta existente
-     */
-    async updateQuestion(id, updates) {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        try {
-            await this.reloadDatabase();
-
-            const index = this.database.findIndex(item => item.id === id);
-
-            if (index === -1) {
-                throw new Error(`Pergunta com ID ${id} não encontrada`);
             }
 
-            if (updates.respostas) {
-                updates.respostas = updates.respostas.map(resposta => {
-                    const respostaNormalizada = {
-                        tipo: resposta.tipo,
-                        conteudo: resposta.conteudo || null,
-                        caminho_arquivo: resposta.caminho_arquivo || null,
-                        ativo: resposta.ativo !== undefined ? resposta.ativo : true
-                    };
-
-                    if (!["texto", "audio", "imagem", "video"].includes(respostaNormalizada.tipo)) {
-                        throw new Error(`Tipo de resposta inválido: ${respostaNormalizada.tipo}`);
-                    }
-
-                    return respostaNormalizada;
-                });
+            if (needsSave) {
+                saveDatabase();
+                logger.info("Banco de dados migrado e salvo.");
             }
 
-            this.database[index] = {
-                ...this.database[index],
-                ...updates,
-                atualizado_em: new Date().toISOString()
-            };
-
-            await this.saveDatabase();
-
-            logger.info(`Pergunta atualizada: ${id}`);
-            return this.database[index];
-
-        } catch (error) {
-            logger.error("Erro ao atualizar pergunta:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Remove uma pergunta (marca como inativa)
-     */
-    async removeQuestion(id) {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        try {
-            await this.reloadDatabase();
-
-            const index = this.database.findIndex(item => item.id === id);
-
-            if (index === -1) {
-                throw new Error(`Pergunta com ID ${id} não encontrada`);
-            }
-
-            this.database[index].ativo = false;
-            this.database[index].atualizado_em = new Date().toISOString();
-
-            await this.saveDatabase();
-
-            logger.info(`Pergunta removida: ${id}`);
-            return this.database[index];
-
-        } catch (error) {
-            logger.error("Erro ao remover pergunta:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Busca pergunta por ID
-     */
-    getQuestionById(id) {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        this.reloadDatabase();
-
-        return this.database.find(item => item.id === id && item.ativo);
-    }
-
-    /**
-     * Atualiza o embedding de uma pergunta
-     */
-    async updateQuestionEmbedding(id, embedding) {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        try {
-            await this.reloadDatabase();
-
-            const index = this.database.findIndex(item => item.id === id);
-
-            if (index === -1) {
-                throw new Error(`Pergunta com ID ${id} não encontrada`);
-            }
-
-            this.database[index].pergunta_embedding = embedding;
-            this.database[index].atualizado_em = new Date().toISOString();
-
-            await this.saveDatabase();
-
-            logger.info(`Embedding atualizado para pergunta: ${id}`);
-
-        } catch (error) {
-            logger.error("Erro ao atualizar embedding:", error);
-            throw error;
-        }
-    }
-
-    /**
-     * Retorna estatísticas do banco de dados
-     */
-    getStats() {
-        if (!this.isInitialized) {
-            throw new Error("Banco de dados não foi inicializado");
-        }
-
-        this.reloadDatabase();
-
-        const total = this.database.length;
-        const ativas = this.database.filter(item => item.ativo).length;
-        const inativas = total - ativas;
-
-        const tiposResposta = {};
-        const totalRespostas = {
-            ativas: 0,
-            inativas: 0
-        };
-
-        this.database.forEach(item => {
-            if (item.ativo) {
-                item.respostas.forEach(resposta => {
-                    if (resposta.ativo) {
-                        tiposResposta[resposta.tipo] = (tiposResposta[resposta.tipo] || 0) + 1;
-                        totalRespostas.ativas++;
-                    } else {
-                        totalRespostas.inativas++;
-                    }
-                });
-            }
-        });
-
-        return {
-            total_perguntas: total,
-            perguntas_ativas: ativas,
-            perguntas_inativas: inativas,
-            total_respostas: totalRespostas,
-            tipos_resposta: tiposResposta,
-            delay_padrao_entre_respostas: this.defaultDelayBetweenResponses
-        };
-    }
-
-    /**
-     * Retorna o caminho para salvar arquivos de mídia
-     */
-    getMediaPath(tipo, nomeArquivo) {
-        return path.join(this.mediaPath, tipo, nomeArquivo);
-    }
-
-    /**
-     * Valida se um arquivo de mídia existe
-     */
-    validateMediaFile(caminhoArquivo) {
-        if (!caminhoArquivo) return false;
-
-        let fullPath = caminhoArquivo;
-        if (!path.isAbsolute(caminhoArquivo)) {
-            fullPath = path.resolve(caminhoArquivo);
-        }
-
-        return fs.existsSync(fullPath);
-    }
-
-    /**
-     * Lista arquivos de mídia disponíveis por tipo
-     */
-    listMediaFiles(tipo) {
-        const mediaTypeDir = path.join(this.mediaPath, tipo);
-
-        if (!fs.existsSync(mediaTypeDir)) {
-            return [];
-        }
-
-        try {
-            return fs.readdirSync(mediaTypeDir).map(file => ({
-                nome: file,
-                caminho_relativo: `./data/media/${tipo}/${file}`,
-                caminho_absoluto: path.join(mediaTypeDir, file)
-            }));
-        } catch (error) {
-            logger.error(`Erro ao listar arquivos de mídia do tipo ${tipo}:`, error);
-            return [];
-        }
-    }
-
-    /**
-     * Configura delay padrão entre respostas múltiplas
-     */
-    setDefaultDelayBetweenResponses(delayMs) {
-        if (delayMs >= 0) {
-            this.defaultDelayBetweenResponses = delayMs;
-            logger.info(`Delay padrão entre respostas atualizado para: ${delayMs}ms`);
+            logger.info("Banco de dados Q&A carregado com sucesso.");
         } else {
-            throw new Error("Delay deve ser um valor positivo em milissegundos");
+            fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+            fs.writeFileSync(DB_FILE, JSON.stringify({ questions: [] }, null, 2), "utf8");
+            logger.info("Banco de dados Q&A criado.");
         }
+
+        fs.mkdirSync(path.join(MEDIA_BASE_PATH, "audio"), { recursive: true });
+        fs.mkdirSync(path.join(MEDIA_BASE_PATH, "imagem"), { recursive: true });
+        fs.mkdirSync(path.join(MEDIA_BASE_PATH, "video"), { recursive: true });
+        logger.info("Pastas de mídia verificadas/criadas.");
+    } catch (error) {
+        logger.error("Erro ao inicializar banco de dados Q&A:", error);
+        throw error;
+    }
+};
+
+const saveDatabase = () => {
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(qaDatabase, null, 2), "utf8");
+        logger.info("Banco de dados Q&A salvo com sucesso.");
+    } catch (error) {
+        logger.error("Erro ao salvar banco de dados Q&A:", error);
+        throw error;
+    }
+};
+
+const addQuestion = async (perguntaTexto, respostas, triggerPhrases = null) => {
+    const newQuestion = {
+        id: uuidv4(),
+        pergunta_texto: perguntaTexto,
+        trigger_phrases: triggerPhrases || [perguntaTexto], // Se não fornecido, usa pergunta_texto
+        respostas: respostas,
+        criado_em: new Date().toISOString(),
+        atualizado_em: new Date().toISOString(),
+        ativo: true,
+    };
+    qaDatabase.questions.push(newQuestion);
+    saveDatabase();
+    return newQuestion;
+};
+
+const updateQuestion = async (id, updates) => {
+    const index = qaDatabase.questions.findIndex(q => q.id === id);
+    if (index === -1) {
+        throw new Error("Pergunta não encontrada.");
     }
 
-    /**
-     * Obtém delay padrão entre respostas múltiplas
-     */
-    getDefaultDelayBetweenResponses() {
-        return this.defaultDelayBetweenResponses;
+    if (updates.trigger_phrases && !Array.isArray(updates.trigger_phrases)) {
+        updates.trigger_phrases = [updates.trigger_phrases];
     }
-}
 
-module.exports = new QADatabaseService();
+    qaDatabase.questions[index] = {
+        ...qaDatabase.questions[index],
+        ...updates,
+        atualizado_em: new Date().toISOString()
+    };
+    saveDatabase();
+    return qaDatabase.questions[index];
+};
+
+const removeQuestion = async (id) => {
+    const initialLength = qaDatabase.questions.length;
+    qaDatabase.questions = qaDatabase.questions.filter(q => q.id !== id);
+    if (qaDatabase.questions.length === initialLength) {
+        throw new Error("Pergunta não encontrada.");
+    }
+    saveDatabase();
+    return { id, message: "Pergunta removida com sucesso." };
+};
+
+const getAllQuestions = () => {
+    logger.info(`[DB DEBUG] Retornando ${qaDatabase.questions.length} perguntas ativas.`);
+    return qaDatabase.questions.filter(q => q.ativo);
+};
+
+const getQuestionById = (id) => {
+    return qaDatabase.questions.find(q => q.id === id);
+};
+
+const validateMediaFile = (filePath) => {
+    if (!filePath) return false;
+    if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+        return true;
+    }
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+    return fs.existsSync(fullPath);
+};
+
+const listMediaFiles = (type) => {
+    const mediaPath = path.join(MEDIA_BASE_PATH, type);
+    if (!fs.existsSync(mediaPath)) {
+        return [];
+    }
+    return fs.readdirSync(mediaPath).map(file => path.join(mediaPath, file));
+};
+
+const getStats = () => {
+    const totalTriggerPhrases = qaDatabase.questions.reduce((acc, q) =>
+        acc + (q.trigger_phrases ? q.trigger_phrases.length : 1), 0);
+
+    return {
+        totalQuestions: qaDatabase.questions.length,
+        activeQuestions: qaDatabase.questions.filter(q => q.ativo).length,
+        totalTriggerPhrases: totalTriggerPhrases,
+        totalResponses: qaDatabase.questions.reduce((acc, q) => acc + q.respostas.length, 0),
+        lastUpdated: qaDatabase.questions.length > 0 ?
+            qaDatabase.questions.reduce((max, q) =>
+                q.atualizado_em > max ? q.atualizado_em : max,
+                qaDatabase.questions[0].atualizado_em) : null,
+    };
+};
+
+const setDefaultDelayBetweenResponses = (delay) => {
+    defaultDelayBetweenResponses = delay;
+};
+
+module.exports = {
+    initialize,
+    addQuestion,
+    updateQuestion,
+    removeQuestion,
+    getAllQuestions,
+    getQuestionById,
+    validateMediaFile,
+    listMediaFiles,
+    getStats,
+    setDefaultDelayBetweenResponses,
+    saveDatabase,
+    qaDatabase
+};
 

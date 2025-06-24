@@ -35,6 +35,21 @@ const formatWhatsappId = (phoneNumber) => {
     return phoneNumberObj.number.replace("+", "") + "@c.us";
 };
 
+// Função para remover o primeiro '9' após o DDD
+const removeFirstNineAfterDDD = (whatsappId) => {
+    const numberWithoutSuffix = whatsappId.replace('@c.us', '');
+    if (numberWithoutSuffix.startsWith('55') && numberWithoutSuffix.length >= 13) {
+        const countryCode = numberWithoutSuffix.substring(0, 2); // 55
+        const ddd = numberWithoutSuffix.substring(2, 4); // DDD
+        const phoneNumber = numberWithoutSuffix.substring(4); // Número de telefone
+
+        if (phoneNumber.startsWith('9') && phoneNumber.length >= 9) {
+            const phoneWithoutNine = phoneNumber.substring(1);
+            return `${countryCode}${ddd}${phoneWithoutNine}@c.us`;
+        }
+    }
+    return null;
+};
 
 const formatCurrency = (value) => `R$${value.toFixed(2).replace(".", ",")}`;
 
@@ -244,11 +259,31 @@ const processWebhook = async (payload) => {
             }
         }
 
+        // Enviar para o número normal
         for (const message of messagesToSend) {
             if (message) {
                 await whatsappService.sendMessage(whatsappId, message);
                 logger.info(`Mensagem enviada para ${whatsappId} (Pedido ${orderId})`);
             }
+        }
+
+        // Verificar e enviar para o número alternativo, se possível
+        const alternativeWhatsappId = removeFirstNineAfterDDD(whatsappId);
+        if (alternativeWhatsappId) {
+            setTimeout(async () => {
+                for (const message of messagesToSend) {
+                    if (message) {
+                        try {
+                            await whatsappService.sendMessage(alternativeWhatsappId, message);
+                            logger.info(`Mensagem enviada para número alternativo ${alternativeWhatsappId} (Pedido ${orderId})`);
+                        } catch (error) {
+                            logger.error(`Erro ao enviar mensagem para número alternativo ${alternativeWhatsappId}: ${error.message}`);
+                        }
+                    }
+                }
+            }, 10000); // 10 segundos de atraso
+        } else {
+            logger.info(`Número alternativo não gerado para ${whatsappId} - não atende aos critérios`);
         }
 
         if (messagesToSend.length === 0) {
@@ -261,6 +296,5 @@ const processWebhook = async (payload) => {
     }
 };
 
+
 module.exports = { processWebhook };
-
-
