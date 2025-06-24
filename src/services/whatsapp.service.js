@@ -17,8 +17,8 @@ const QA_CONFIG = {
     enableProcessingMessage: false,
     delayBetweenResponses: 2000,
     audioAsVoiceNote: true,
-    videoAsDocument: false,
-    sendVideoAsUrlFallback: true,
+    videoAsDocument: true,
+    sendVideoAsUrlFallback: false,
     sendFallbackMessage: false
 };
 
@@ -38,15 +38,8 @@ const initializeWhatsAppClient = async () => {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu'
-            ],
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
         }
     });
 
@@ -63,13 +56,13 @@ const initializeWhatsAppClient = async () => {
     client.on("ready", async () => {
         isClientReady = true;
         logger.info("Cliente WhatsApp está pronto!");
-        
+
         try {
             await initializeQAServices();
         } catch (error) {
             logger.error("Erro ao inicializar serviços Q&A:", error);
         }
-        
+
         if (fs.existsSync(QR_FILE_PATH)) {
             try {
                 fs.unlinkSync(QR_FILE_PATH);
@@ -109,10 +102,10 @@ const initializeWhatsAppClient = async () => {
 const initializeQAServices = async () => {
     try {
         logger.info("Inicializando serviços Q&A...");
-        
+
         await qaDatabase.initialize();
         await questionDetection.initialize();
-        
+
         logger.info("Serviços Q&A inicializados com sucesso");
     } catch (error) {
         logger.error("Erro ao inicializar serviços Q&A:", error);
@@ -147,19 +140,19 @@ const handleIncomingMessage = async (message) => {
         }
 
         const questions = qaDatabase.getAllQuestions();
-        
+
         const detection = await questionDetection.detectQuestion(userMessage, questions);
 
         if (detection.isQuestion && detection.matchedQuestion) {
             logger.info(`Pergunta detectada com similaridade ${detection.similarity} - Frase gatilho: "${detection.matchedTriggerPhrase}"`);
-            
+
             const responses = detection.matchedQuestion.respostas.filter(r => r.ativo);
-            
+
             await sendMultipleResponses(fromNumber, responses);
-            
+
         } else {
             logUnmatchedQuestion(userMessage);
-            
+
             if (QA_CONFIG.sendFallbackMessage) {
                 logger.info(`Pergunta não reconhecida ou similaridade baixa (${detection.similarity}). Enviando fallback.`);
                 await sendMessage(fromNumber, QA_CONFIG.fallbackMessage);
@@ -170,7 +163,7 @@ const handleIncomingMessage = async (message) => {
 
     } catch (error) {
         logger.error("Erro ao processar mensagem recebida:", error);
-        
+
         if (QA_CONFIG.sendFallbackMessage) {
             try {
                 await sendMessage(message.from, "Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente.");
@@ -196,18 +189,18 @@ const sendMultipleResponses = async (number, responses) => {
     try {
         for (let i = 0; i < responses.length; i++) {
             const response = responses[i];
-            
+
             await sendResponse(number, response);
-            
+
             if (i < responses.length - 1) {
                 const delay = QA_CONFIG.delayBetweenResponses;
                 logger.info(`Aguardando ${delay}ms antes da próxima resposta...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
-        
+
         logger.info(`${responses.length} resposta(s) enviada(s) com sucesso para ${number}`);
-        
+
     } catch (error) {
         logger.error("Erro ao enviar múltiplas respostas:", error);
         throw error;
@@ -220,7 +213,7 @@ const sendResponse = async (number, response) => {
             case "texto":
                 await sendMessage(number, response.conteudo);
                 break;
-                
+
             case "audio":
                 if (response.caminho_arquivo && qaDatabase.validateMediaFile(response.caminho_arquivo)) {
                     await sendMediaMessage(number, response.caminho_arquivo, "audio", response.conteudo, {
@@ -233,7 +226,7 @@ const sendResponse = async (number, response) => {
                     }
                 }
                 break;
-                
+
             case "imagem":
                 if (response.caminho_arquivo && qaDatabase.validateMediaFile(response.caminho_arquivo)) {
                     await sendMediaMessage(number, response.caminho_arquivo, "image", response.conteudo);
@@ -244,7 +237,7 @@ const sendResponse = async (number, response) => {
                     }
                 }
                 break;
-                
+
             case "video":
                 if (response.caminho_arquivo) {
                     try {
@@ -277,7 +270,7 @@ const sendResponse = async (number, response) => {
                     }
                 }
                 break;
-                
+
             default:
                 logger.warn(`Tipo de resposta não suportado: ${response.tipo}`);
                 if (response.conteudo) {
@@ -310,18 +303,18 @@ const processQueue = async () => {
             logger.info(`Enviando mensagem para ${number}`);
 
             const chat = await client.getChatById(number);
-            
+
             if (media) {
                 const sendOptions = { caption: message };
-                
+
                 if (options && options.sendAsVoiceNote && media.mimetype && media.mimetype.startsWith("audio/")) {
                     sendOptions.sendAudioAsVoice = true;
                 }
-                
+
                 if (options && options.sendAsDocument && media.mimetype && media.mimetype.startsWith("video/")) {
                     sendOptions.sendAsDocument = true;
                 }
-                
+
                 await chat.sendMessage(media, sendOptions);
             } else {
                 if (chat) {
@@ -359,24 +352,24 @@ const sendMediaMessage = (number, filePath, mediaType, caption = "", options = {
             if (!path.isAbsolute(filePath)) {
                 fullPath = path.resolve(filePath);
             }
-            
+
             if (!fs.existsSync(fullPath)) {
                 throw new Error(`Arquivo não encontrado: ${fullPath}`);
             }
-            
+
             const media = MessageMedia.fromFilePath(fullPath);
-            
+
             if (mediaType === "video") {
                 media.mimetype = "video/mp4";
             }
 
-            queue.push({ 
-                number, 
-                message: caption, 
-                media, 
+            queue.push({
+                number,
+                message: caption,
+                media,
                 options,
-                resolve, 
-                reject 
+                resolve,
+                reject
             });
             processQueue();
         } catch (error) {
@@ -396,11 +389,11 @@ const isValidUrl = (string) => {
 
 const updateQAConfig = (newConfig) => {
     Object.assign(QA_CONFIG, newConfig);
-    
+
     if (newConfig.delayBetweenResponses !== undefined) {
         qaDatabase.setDefaultDelayBetweenResponses(newConfig.delayBetweenResponses);
     }
-    
+
     logger.info("Configurações Q&A atualizadas:", QA_CONFIG);
 };
 
@@ -481,7 +474,7 @@ const testQuestion = async (pergunta) => {
     try {
         const questions = qaDatabase.getAllQuestions();
         const detection = await questionDetection.detectQuestion(pergunta, questions);
-        
+
         return {
             pergunta_original: pergunta,
             is_question: detection.isQuestion,
